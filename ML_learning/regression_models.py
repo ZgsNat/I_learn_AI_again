@@ -9,7 +9,7 @@ from sklearn.compose import ColumnTransformer
 from sklearn.preprocessing import StandardScaler,OrdinalEncoder, OneHotEncoder
 from sklearn.metrics import mean_squared_error, mean_absolute_error, root_mean_squared_error, r2_score
 from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
-from sklearn.model_selection import GridSearchCV
+from sklearn.model_selection import GridSearchCV, RandomizedSearchCV
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
 data_path = os.path.join(current_dir, "StudentScore.xls")
@@ -77,9 +77,18 @@ params = {
     "preprocessor__num_feature__imputer__strategy":["median", "mean"]
 }
 
-model = GridSearchCV(
+# model = GridSearchCV(
+#     estimator=reg,
+#     param_grid= params,
+#     scoring="r2",
+#     cv=6,
+#     verbose=1,
+#     n_jobs=1 
+# )
+model = RandomizedSearchCV(
     estimator=reg,
-    param_grid= params,
+    param_distributions=params,
+    n_iter=30,
     scoring="r2",
     cv=6,
     verbose=1,
