@@ -53,7 +53,6 @@ reg = Pipeline(steps=[
     ("preprocessor", transformer),
     ("regressor", RandomForestRegressor())
 ])
-
 # model.fit(x_train,y_train)
 
 # y_predict = model.predict(x_test)
