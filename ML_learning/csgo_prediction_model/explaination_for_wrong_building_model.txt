@@ -1,0 +1,47 @@
+Chào bạn, câu hỏi của bạn rất hay và tinh ý\!
+
+**Câu trả lời ngắn gọn:** Precision của "Tie" (hòa) cao chót vót (1.00) là do một vấn đề rất phổ biến trong machine learning gọi là **rò rỉ dữ liệu (data leakage)**.
+
+-----
+
+## Giải thích chi tiết
+
+### 1\. Rò rỉ dữ liệu là gì?
+
+Trong trường hợp của bạn, rò rỉ dữ liệu xảy ra khi mô hình được "vô tình" cung cấp thông tin về kết quả cuối cùng của trận đấu ngay trong chính dữ liệu đầu vào. Mô hình không thực sự "học" cách dự đoán, mà nó chỉ đơn giản là "nhìn" vào đáp án có sẵn.
+
+### 2\. Thủ phạm chính là ai?
+
+Thủ phạm chính là 2 cột: `team_a_rounds` và `team_b_rounds`.
+
+Trong game CS:GO, một trận đấu thông thường sẽ kết thúc với tỉ số hòa khi cả hai đội cùng đạt **15 round thắng**.
+
+  * Khi `team_a_rounds` = 15 VÀ `team_b_rounds` = 15, kết quả trận đấu **chắc chắn 100%** là "Tie".
+
+Mô hình của bạn cực kỳ thông minh và đã nhanh chóng học được quy tắc đơn giản này từ dữ liệu huấn luyện. Vì vậy, khi nó nhìn vào dữ liệu kiểm tra (`X_test`), bất cứ khi nào nó thấy một hàng có `team_a_rounds` là 15 và `team_b_rounds` là 15, nó sẽ dự đoán là "Tie" với sự tự tin tuyệt đối.
+
+### 3\. Giải thích các chỉ số Precision và Recall
+
+  * **Precision = 1.00**: Chỉ số này có nghĩa là "Trong tất cả các lần mô hình dự đoán là 'Tie', nó đã đúng 100%". Điều này hoàn toàn hợp lý, vì như đã giải thích ở trên, khi mô hình thấy tỉ số 15-15, nó không thể sai được.
+  * **Recall = 0.95**: Chỉ số này có nghĩa là "Trong tất cả các trận hòa 'Tie' có thật trong tập dữ liệu kiểm tra, mô hình đã tìm ra được 95% trong số chúng". Có thể có 1 trường hợp hòa nào đó (trong tổng số 20 trận hòa của tập test) không phải là 15-15 (ví dụ một thể thức thi đấu khác), nên mô hình đã bỏ lỡ.
+
+### Vấn đề là gì?
+
+Mặc dù điểm số rất cao, mô hình này lại **vô dụng trong thực tế**. Mục tiêu của bạn là dự đoán kết quả trận đấu **trước khi nó kết thúc**. Bạn không thể biết được số round thắng của mỗi đội cho đến khi trận đấu đã ngã ngũ. Việc đưa `team_a_rounds` và `team_b_rounds` vào huấn luyện chẳng khác nào đưa đáp án cho học sinh trước khi làm bài kiểm tra.
+
+-----
+
+## ✅ Hướng giải quyết
+
+Bạn đã thực sự giải quyết vấn đề này trong đoạn code **đầu tiên** mà bạn gửi\!
+
+Cách làm đúng là phải **loại bỏ các cột gây rò rỉ dữ liệu** trước khi huấn luyện:
+
+```python
+# Đúng! Loại bỏ các cột chứa kết quả cuối cùng
+data = data.drop(columns=["team_a_rounds", "team_b_rounds"])
+```
+
+Khi bạn loại bỏ hai cột này, mô hình sẽ buộc phải học cách dự đoán dựa trên các chỉ số hiệu suất thực sự của người chơi trong trận đấu (như `kills`, `deaths`, `mvps`, `hs_percent`, `points`, v.v.). Điểm số F1-score có thể sẽ thấp hơn, nhưng đó mới là **điểm số trung thực** và phản ánh đúng khả năng dự đoán của mô hình trên dữ liệu chưa biết trước kết quả.
+
+**Tóm lại:** Mô hình đầu tiên của bạn (có Feature Engineering và loại bỏ cột rò rỉ) là mô hình chính xác và có giá trị hơn, dù điểm số bề ngoài có vẻ thấp hơn. Mô hình thứ hai có điểm số cao một cách giả tạo do rò rỉ dữ liệu.

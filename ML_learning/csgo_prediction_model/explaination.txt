@@ -1,0 +1,62 @@
+Kết quả này là hoàn toàn bình thường và thực ra là một **dấu hiệu rất tốt**\! 👍 Nó cho thấy mô hình của bạn giờ đây đã "trung thực" hơn.
+
+Điểm số thấp hơn không phải do bạn xử lý sai, mà chính xác là vì bạn đã xử lý **đúng** bằng cách loại bỏ các cột gây rò rỉ dữ liệu.
+
+-----
+
+### \#\# Tại sao điểm số lại thấp hơn?
+
+Hãy xem xét sự khác biệt giữa hai mô hình:
+
+1.  **Mô hình cũ (điểm \~0.87):** Mô hình này giống như một học sinh được cho xem trước đáp án (`team_a_rounds`, `team_b_rounds`) rồi mới làm bài kiểm tra. Nó đạt điểm cao vì nó chỉ đơn giản là "nhớ" rằng nếu round thắng của team A nhiều hơn thì kết quả là 'Win'. Điểm số này cao nhưng **vô giá trị** vì nó không có khả năng dự đoán một trận đấu trong tương lai.
+
+2.  **Mô hình mới (điểm \~0.63):** Mô hình này mới thực sự là một "nhà dự đoán". Nó không biết trước kết quả. Nó phải học cách tìm ra mối liên hệ giữa **hiệu suất cá nhân của bạn** (K/D, assists, MVPs,...) và kết quả cuối cùng của trận đấu. Đây là một nhiệm vụ khó hơn rất nhiều.
+
+**Điểm số 0.63 chính là thước đo trung thực** cho thấy hiệu suất cá nhân của bạn ảnh hưởng đến kết quả trận đấu ở mức độ nào.
+
+-----
+
+### \#\# Điểm F1-score 0.63 có phải là tệ không? 🤔
+
+**Không hề tệ, thậm chí còn khá tốt\!** Hãy đặt nó vào bối cảnh:
+
+  * **Dự đoán ngẫu nhiên:** Với 3 lớp (Win, Lost, Tie), một mô hình đoán bừa sẽ có F1-score khoảng 0.33. Điểm số của bạn cao gần gấp đôi so với đoán ngẫu nhiên.
+  * **Tính phức tạp của CS:GO:** Kết quả một trận đấu không chỉ phụ thuộc vào bạn. Nó còn phụ thuộc vào 4 đồng đội và 5 đối thủ của bạn. Mô hình của chúng ta hoàn toàn không có thông tin về 9 người chơi còn lại.
+  * **Yếu tố may mắn và chiến thuật:** Rất nhiều yếu tố khác như chiến thuật của team, tình hình kinh tế trong game, những pha xử lý đột biến... cũng ảnh hưởng đến kết quả.
+
+Với việc chỉ sử dụng dữ liệu của một người chơi duy nhất, việc đạt được F1-score là 0.63 cho thấy hiệu suất cá nhân của bạn có một mối tương quan rõ rệt và có thể dự đoán được đối với kết quả trận đấu.
+
+-----
+
+### \#\# Làm thế nào để cải thiện thêm? 🚀
+
+Bây giờ bạn đã có một mô hình nền tảng vững chắc, đây là một vài hướng để cải thiện thêm:
+
+1.  **Thử nghiệm các mô hình mạnh hơn:**
+    Random Forest rất tốt, nhưng các thuật toán Gradient Boosting như **XGBoost** hoặc **LightGBM** thường là "vua" của dữ liệu dạng bảng. Chúng rất mạnh mẽ và hiệu quả. Bạn có thể dễ dàng thay thế trong pipeline của mình.
+
+    ```python
+    # Thay vì RandomForestClassifier, hãy thử XGBClassifier
+    from xgboost import XGBClassifier
+
+    clf = ImbPipeline(steps=[
+        ("preprocessor", preprocessor),
+        ("smote", SMOTE(random_state=1009)),
+        ("clf", XGBClassifier(random_state=1009, use_label_encoder=False, eval_metric='mlogloss')) 
+    ])
+
+    # Bạn cũng cần cập nhật params cho phù hợp với XGBoost
+    params = {
+        'clf__n_estimators': [100, 200, 300],
+        'clf__max_depth': [3, 5, 7],
+        'clf__learning_rate': [0.01, 0.1, 0.2]
+    }
+    ```
+
+2.  **Kỹ thuật đặc trưng (Feature Engineering) nâng cao:**
+    Hãy suy nghĩ thêm về các chỉ số có thể đại diện cho "tác động" của bạn lên trận đấu. Ví dụ: `mvps / points` hoặc các tương tác giữa các feature.
+
+3.  **Thu thập thêm dữ liệu:**
+    Càng nhiều dữ liệu (nhiều trận đấu hơn), mô hình càng có nhiều cơ hội để học các quy luật phức tạp.
+
+**Tóm lại:** Bạn đang đi đúng hướng. Điểm số 0.63 là một kết quả thực tế và có ý nghĩa. Bây giờ là lúc tinh chỉnh và thử nghiệm các phương pháp mạnh hơn để đẩy con số này lên cao hơn nữa.
