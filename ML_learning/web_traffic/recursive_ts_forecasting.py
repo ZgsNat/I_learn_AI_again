@@ -36,7 +36,7 @@ x_test = X[train_size:]
 y_train = y[:train_size]
 y_test = y[train_size:]
 
-model = RandomForestRegressor()
+model = LinearRegression()
 model.fit(x_train, y_train)
 
 y_predict = model.predict(x_test)
@@ -46,4 +46,13 @@ print("MSE: {}".format(mean_squared_error(y_test, y_predict)))
 print("RMSE: {}".format(np.sqrt(mean_squared_error(y_test, y_predict))))
 print("R2: {}".format(r2_score(y_test, y_predict)))
 
+sample_input = [820, 815, 830, 845, 860, 870, 880, 890, 910, 
+ 920, 940, 960, 970, 980, 995, 1000, 1015, 1020, 
+ 1040, 1055, 1060, 1075, 1080, 1090, 1100]
 
+for i in range(10):
+    print("Input: {}".format(sample_input))
+    prediction = model.predict([sample_input])
+    print(prediction)
+    sample_input = sample_input[1:] + prediction.tolist()
+    print("----------")
