@@ -4,7 +4,7 @@ import lightgbm as lgb
 from sklearn.metrics import mean_squared_error, mean_absolute_error
 import matplotlib.pyplot as plt
 import seaborn as sns
-
+import numpy as np
 
 try:
     current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -37,18 +37,36 @@ print("Chuẩn bị dữ liệu xong.")
 # --- Phần 2: Tạo Feature dạng Lag (Supervised Learning Format) ---
 print("Bắt đầu tạo feature dạng lag...")
 def create_multivariate_ts_data_recursion(data, columns_to_lag, target_column, window_size=10):
-    """Tạo dữ liệu cho chiến lược đệ quy từ bộ dữ liệu đa biến."""
-    df = data.copy()
+    """
+    Tạo dữ liệu cho chiến lược đệ quy từ bộ dữ liệu đa biến.
+    Phiên bản này đã được tối ưu hóa để tránh PerformanceWarning.
+    """
+    original_df = data.copy()
+    
+    # Tạo một danh sách để chứa tất cả các DataFrame lag
+    list_of_lag_dfs = []
+    
     for col in columns_to_lag:
         for i in range(1, window_size + 1):
-            df[f'{col}_lag_{i}'] = df[col].shift(i)
+            # Tạo một DataFrame mới chỉ chứa một cột lag
+            lag_df = original_df[[col]].shift(i).rename(columns={col: f'{col}_lag_{i}'})
+            list_of_lag_dfs.append(lag_df)
+
+    # Ghép tất cả các DataFrame lag với DataFrame gốc một lần duy nhất
+    # Đây là cách làm hiệu quả mà Pandas gợi ý
+    df = pd.concat([original_df] + list_of_lag_dfs, axis=1)
     
+    # Đổi tên cột mục tiêu
     df = df.rename(columns={target_column: 'target'})
     df = df.dropna(axis=0)
     
     y = df['target']
-    # Loại bỏ các cột gốc đã được tạo lag
-    cols_to_drop = ['target'] + columns_to_lag
+    
+    # SỬA LỖI KEYERROR TẠI ĐÂY
+    # Cột 'Demand' gốc đã được đổi tên thành 'target', nên ta không cần xóa nó nữa
+    # Chỉ cần xóa các cột gốc khác đã được tạo lag
+    cols_to_drop = ['target'] + [col for col in columns_to_lag if col != target_column]
+    
     X = df.drop(columns=cols_to_drop)
     return X, y
 
@@ -97,7 +115,10 @@ y_pred = model.predict(X_test)
 
 # Tính toán các chỉ số lỗi
 mae = mean_absolute_error(y_test, y_pred)
-rmse = mean_squared_error(y_test, y_pred, squared=False)
+# Tính Mean Squared Error trước
+mse = mean_squared_error(y_test, y_pred)
+# Sau đó lấy căn bậc hai để có Root Mean Squared Error
+rmse = np.sqrt(mse)
 
 print(f"Mean Absolute Error (MAE): {mae:.2f}")
 print(f"Root Mean Squared Error (RMSE): {rmse:.2f}")
