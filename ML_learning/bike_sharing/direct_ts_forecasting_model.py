@@ -82,6 +82,7 @@ pipeline = Pipeline([
     ('regressor', RandomForestRegressor(n_estimators=100, random_state=42, n_jobs=-1, min_samples_leaf=5))
 ])
 
+pipeline.fit(X_train, y_train)
 
 y_pred = pipeline.predict(X_test)
 y_pred = pd.DataFrame(y_pred, index=y_test.index, columns=y_test.columns)
