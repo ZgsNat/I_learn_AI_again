@@ -6,7 +6,7 @@ from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler, OneHotEncoder
 from sklearn.compose import ColumnTransformer
-
+from lightgbm import LGBMRegressor
 
 try:
     current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -64,9 +64,13 @@ preprocessor = ColumnTransformer(
     ]   
 )
 
+# model = Pipeline(steps=[
+#     ('preprocessor', preprocessor),
+#     ('regressor', RandomForestRegressor(n_estimators=100, random_state=42, n_jobs=-1))
+# ])
 model = Pipeline(steps=[
     ('preprocessor', preprocessor),
-    ('regressor', RandomForestRegressor(n_estimators=100, random_state=42, n_jobs=-1))
+    ('regressor', LGBMRegressor(n_estimators=100, random_state=42, n_jobs=-1))
 ])
 
 model.fit(X_train, y_train)
