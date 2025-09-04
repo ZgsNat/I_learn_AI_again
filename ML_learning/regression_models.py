@@ -1,6 +1,6 @@
 import pandas as pd
 import os
-from ydata_profiling import ProfileReport
+# from ydata_profiling import ProfileReport
 from sklearn.model_selection import train_test_split
 from sklearn.linear_model import LinearRegression
 from sklearn.pipeline import Pipeline
