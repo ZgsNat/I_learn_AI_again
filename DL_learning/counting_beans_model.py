@@ -1,105 +1,330 @@
 import cv2
 import numpy as np
 import matplotlib.pyplot as plt
+from sklearn.cluster import DBSCAN
+from scipy import ndimage
+import argparse
 import os
-
-current_dir = os.path.dirname(os.path.abspath(__file__))
-image_path = os.path.join(current_dir, "CEO-2-5-scaled.jpg")
-
-def count_beans_watershed_with_labels(image_path):
-    """
-    Hàm này thực hiện đếm hạt đậu bằng thuật toán Watershed và hiển thị kết quả
-    với đường viền và số thứ tự cho từng hạt.
-    """
-    # 1. Đọc ảnh
-    img = cv2.imread(image_path)
-    if img is None:
-        print(f"Lỗi: Không thể đọc ảnh từ đường dẫn {image_path}")
-        return
-
-    # Tạo bản sao của ảnh gốc để vẽ kết quả lên
-    img_labeled = img.copy()
-
-    # --- Các bước xử lý ảnh (như code trước) ---
-    # 2. Tiền xử lý
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    blurred = cv2.GaussianBlur(gray, (5, 5), 0)
-
-    # 3. Phân ngưỡng thích ứng
-    thresh = cv2.adaptiveThreshold(blurred, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-                                   cv2.THRESH_BINARY_INV, 11, 2)
-
-    # 4. Dọn dẹp nhiễu
-    kernel = np.ones((3, 3), np.uint8)
-    opening = cv2.morphologyEx(thresh, cv2.MORPH_OPEN, kernel, iterations=2)
-    closing = cv2.morphologyEx(opening, cv2.MORPH_CLOSE, kernel, iterations=2)
-
-    # 5. Chuẩn bị cho Watershed
-    sure_bg = cv2.dilate(closing, kernel, iterations=3)
-    dist_transform = cv2.distanceTransform(closing, cv2.DIST_L2, 5)
-    ret, sure_fg = cv2.threshold(dist_transform, 0.3 * dist_transform.max(), 255, 0)
-    sure_fg = np.uint8(sure_fg)
-    unknown = cv2.subtract(sure_bg, sure_fg)
-
-    # 6. Tạo Markers
-    ret, markers = cv2.connectedComponents(sure_fg)
-    markers = markers + 1
-    markers[unknown == 255] = 0
-
-    # 7. Áp dụng Watershed
-    markers = cv2.watershed(img, markers)
-
-    # --- Phần đếm và hiển thị chi tiết ---
-    # 8. Đếm, vẽ đường viền và đánh số
-    font = cv2.FONT_HERSHEY_SIMPLEX
-    font_scale = 0.4  # Giảm kích thước font một chút để đỡ rối
-    font_thickness = 1
-    text_color = (0, 0, 0) # Chữ màu đen
-
-    # Lấy các nhãn (labels) duy nhất mà watershed đã tạo ra
-    unique_labels = np.unique(markers)
-    # Loại bỏ nhãn -1 (ranh giới) và 1 (nền) để chỉ còn lại các nhãn của hạt đậu
-    bean_labels = [label for label in unique_labels if label > 1]
-    bean_count = len(bean_labels)
-
-    # Lặp qua từng nhãn của hạt đậu để xử lý
-    for i, label in enumerate(bean_labels):
-        # Tạo một "mặt nạ" chỉ chứa hạt đậu hiện tại
-        mask = np.zeros(markers.shape, dtype=np.uint8)
-        mask[markers == label] = 255
-
-        # Tìm đường viền (contour) của hạt đậu đó
-        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-
-        if contours:
-            # Lấy contour lớn nhất (để tránh các nhiễu nhỏ nếu có)
-            cnt = max(contours, key=cv2.contourArea)
-
-            # Vẽ đường viền màu xanh lá cây lên ảnh kết quả
-            cv2.drawContours(img_labeled, [cnt], -1, (0, 255, 0), 1)
-
-            # Tìm tọa độ tâm của contour để đặt số thứ tự
-            M = cv2.moments(cnt)
-            if M["m00"] != 0:
-                cX = int(M["m10"] / M["m00"])
-                cY = int(M["m01"] / M["m00"])
+class BeanCounter:
+    def __init__(self, 
+                 blur_kernel=5,
+                 canny_low=50,
+                 canny_high=150,
+                 min_contour_area=100,
+                 max_contour_area=2000,
+                 circularity_threshold=0.3,
+                 dbscan_eps=30,
+                 dbscan_min_samples=1):
+        """
+        Initialize the Bean Counter with customizable parameters
+        
+        Args:
+            blur_kernel: Gaussian blur kernel size
+            canny_low: Lower threshold for Canny edge detection
+            canny_high: Upper threshold for Canny edge detection
+            min_contour_area: Minimum area for valid bean contours
+            max_contour_area: Maximum area for valid bean contours
+            circularity_threshold: Minimum circularity for bean detection
+            dbscan_eps: DBSCAN clustering epsilon parameter
+            dbscan_min_samples: DBSCAN minimum samples parameter
+        """
+        self.blur_kernel = blur_kernel
+        self.canny_low = canny_low
+        self.canny_high = canny_high
+        self.min_contour_area = min_contour_area
+        self.max_contour_area = max_contour_area
+        self.circularity_threshold = circularity_threshold
+        self.dbscan_eps = dbscan_eps
+        self.dbscan_min_samples = dbscan_min_samples
+        
+    def preprocess_image(self, image):
+        """
+        Preprocess the image for better bean detection
+        """
+        # Convert to grayscale if needed
+        if len(image.shape) == 3:
+            gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        else:
+            gray = image.copy()
+        
+        # Apply Gaussian blur to reduce noise
+        blurred = cv2.GaussianBlur(gray, (self.blur_kernel, self.blur_kernel), 0)
+        
+        # Enhance contrast using CLAHE
+        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
+        enhanced = clahe.apply(blurred)
+        
+        return enhanced
+    
+    def detect_bean_contours(self, image):
+        """
+        Detect bean contours using edge detection and contour analysis
+        """
+        # Apply Canny edge detection
+        edges = cv2.Canny(image, self.canny_low, self.canny_high)
+        
+        # Apply morphological operations to close gaps
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+        edges = cv2.morphologyEx(edges, cv2.MORPH_CLOSE, kernel)
+        
+        # Find contours
+        contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        
+        return contours, edges
+    
+    def filter_bean_contours(self, contours):
+        """
+        Filter contours based on area and shape characteristics
+        """
+        valid_contours = []
+        
+        for contour in contours:
+            # Calculate area
+            area = cv2.contourArea(contour)
+            
+            # Filter by area
+            if area < self.min_contour_area or area > self.max_contour_area:
+                continue
+            
+            # Calculate circularity (4π*area/perimeter²)
+            perimeter = cv2.arcLength(contour, True)
+            if perimeter == 0:
+                continue
                 
-                # Vẽ số thứ tự (bắt đầu từ 1) lên ảnh
-                cv2.putText(img_labeled, str(i + 1), (cX - 10, cY + 5), font,
-                            font_scale, text_color, font_thickness, cv2.LINE_AA)
+            circularity = 4 * np.pi * area / (perimeter * perimeter)
+            
+            # Filter by circularity (beans are roughly circular/oval)
+            if circularity > self.circularity_threshold:
+                valid_contours.append(contour)
+        
+        return valid_contours
+    
+    def get_contour_centers(self, contours):
+        """
+        Get the center points of contours
+        """
+        centers = []
+        
+        for contour in contours:
+            # Calculate moments
+            M = cv2.moments(contour)
+            
+            # Calculate center coordinates
+            if M["m00"] != 0:
+                cx = int(M["m10"] / M["m00"])
+                cy = int(M["m01"] / M["m00"])
+                centers.append((cx, cy))
+        
+        return centers
+    
+    def cluster_nearby_detections(self, centers):
+        """
+        Use DBSCAN clustering to merge nearby detections of the same bean
+        """
+        if len(centers) == 0:
+            return centers
+        
+        # Convert to numpy array
+        points = np.array(centers)
+        
+        # Apply DBSCAN clustering
+        clustering = DBSCAN(eps=self.dbscan_eps, min_samples=self.dbscan_min_samples)
+        clusters = clustering.fit_predict(points)
+        
+        # Get cluster centers
+        unique_clusters = np.unique(clusters)
+        cluster_centers = []
+        
+        for cluster_id in unique_clusters:
+            if cluster_id == -1:  # Noise points
+                noise_points = points[clusters == cluster_id]
+                cluster_centers.extend([tuple(point) for point in noise_points])
+            else:
+                cluster_points = points[clusters == cluster_id]
+                center = tuple(np.mean(cluster_points, axis=0).astype(int))
+                cluster_centers.append(center)
+        
+        return cluster_centers
+    
+    def count_beans(self, image_path):
+        """
+        Main method to count beans in an image
+        
+        Args:
+            image_path: Path to the image file
+            
+        Returns:
+            tuple: (count, annotated_image)
+        """
+        # Load image
+        image = cv2.imread(image_path)
+        if image is None:
+            raise ValueError(f"Could not load image from {image_path}")
+        
+        # Preprocess image
+        processed = self.preprocess_image(image)
+        
+        # Detect contours
+        contours, edges = self.detect_bean_contours(processed)
+        
+        # Filter valid bean contours
+        valid_contours = self.filter_bean_contours(contours)
+        
+        # Get contour centers
+        centers = self.get_contour_centers(valid_contours)
+        
+        # Cluster nearby detections
+        final_centers = self.cluster_nearby_detections(centers)
+        
+        # Create annotated image
+        annotated_image = self.annotate_image(image, final_centers)
+        
+        return len(final_centers), annotated_image, edges
+    
+    def annotate_image(self, image, centers, circle_color=(0, 255, 0), circle_thickness=3):
+        """
+        Draw green circles around detected beans
+        """
+        annotated = image.copy()
+        
+        for i, (cx, cy) in enumerate(centers):
+            # Draw green circle around each detected bean
+            cv2.circle(annotated, (cx, cy), 25, circle_color, circle_thickness)
+            
+            # Add number label
+            cv2.putText(annotated, str(i+1), (cx-10, cy-30), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.6, circle_color, 2)
+        
+        return annotated
+    
+    def display_results(self, original_image, annotated_image, edges, count):
+        """
+        Display the results using matplotlib
+        """
+        fig, axes = plt.subplots(1, 3, figsize=(18, 6))
+        
+        # Original image
+        axes[0].imshow(cv2.cvtColor(original_image, cv2.COLOR_BGR2RGB))
+        axes[0].set_title('Original Image')
+        axes[0].axis('off')
+        
+        # Edge detection result
+        axes[1].imshow(edges, cmap='gray')
+        axes[1].set_title('Edge Detection')
+        axes[1].axis('off')
+        
+        # Annotated result
+        axes[2].imshow(cv2.cvtColor(annotated_image, cv2.COLOR_BGR2RGB))
+        axes[2].set_title(f'Detected Beans: {count}')
+        axes[2].axis('off')
+        
+        plt.tight_layout()
+        plt.show()
 
-    # In ra tổng số lượng
-    print(f"Tổng số lượng hạt đậu đếm được: {bean_count}")
+def main():
+    """
+    Main function to run the bean counter
+    """
+    parser = argparse.ArgumentParser(description='Count beans in an image')
+    parser.add_argument('image_path', help='Path to the image file')
+    parser.add_argument('--blur-kernel', type=int, default=5, help='Gaussian blur kernel size')
+    parser.add_argument('--canny-low', type=int, default=50, help='Canny low threshold')
+    parser.add_argument('--canny-high', type=int, default=150, help='Canny high threshold')
+    parser.add_argument('--min-area', type=int, default=100, help='Minimum contour area')
+    parser.add_argument('--max-area', type=int, default=2000, help='Maximum contour area')
+    parser.add_argument('--circularity', type=float, default=0.3, help='Minimum circularity threshold')
+    parser.add_argument('--save-result', help='Path to save the annotated image')
+    
+    args = parser.parse_args()
+    
+    # Initialize bean counter
+    counter = BeanCounter(
+        blur_kernel=args.blur_kernel,
+        canny_low=args.canny_low,
+        canny_high=args.canny_high,
+        min_contour_area=args.min_area,
+        max_contour_area=args.max_area,
+        circularity_threshold=args.circularity
+    )
+    
+    try:
+        # Count beans
+        count, annotated_image, edges = counter.count_beans(args.image_path)
+        
+        # Load original for display
+        original_image = cv2.imread(args.image_path)
+        
+        # Display results
+        counter.display_results(original_image, annotated_image, edges, count)
+        
+        print(f"Total beans detected: {count}")
+        
+        # Save result if requested
+        if args.save_result:
+            cv2.imwrite(args.save_result, annotated_image)
+            print(f"Annotated image saved to: {args.save_result}")
+            
+    except Exception as e:
+        print(f"Error: {e}")
 
-    # --- Hiển thị ảnh kết quả cuối cùng ---
-    # Sử dụng Matplotlib để hiển thị ảnh trong các môi trường như Jupyter Notebook
-    plt.figure(figsize=(12, 12)) # Kích thước cửa sổ hiển thị
-    plt.imshow(cv2.cvtColor(img_labeled, cv2.COLOR_BGR2RGB)) # Chuyển BGR (OpenCV) sang RGB (Matplotlib)
-    plt.title(f'Kết quả đếm hạt đậu: {bean_count} hạt', fontsize=16)
-    plt.axis('off') # Ẩn các trục tọa độ
-    plt.show()
+# Example usage
+if __name__ == "__main__":
+    # --- BẮT ĐẦU PHẦN CHỈNH SỬA ---
 
-# --- Chạy chương trình ---
-# Thay 'bean_image.jpg' bằng đường dẫn đến ảnh của bạn
-# Ví dụ: count_beans_watershed_with_labels('C:/Users/Admin/Desktop/bean_image.jpg') 
-count_beans_watershed_with_labels(image_path)
+    # 1. Xác định đường dẫn tuyệt đối đến ảnh của bạn
+    # Đảm bảo file ảnh "CEO-2-5-scaled.jpg" nằm cùng thư mục với file Python này
+    try:
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        image_path = os.path.join(current_dir, "CEO-2-5-scaled.jpg")
+    except NameError:
+        # Xử lý khi chạy trong môi trường không có __file__ (ví dụ: notebook)
+        image_path = "CEO-2-5-scaled.jpg"
+
+
+    # 2. Khởi tạo và chạy bộ đếm
+    print(f"Đang xử lý ảnh: {image_path}")
+    counter = BeanCounter() # Sử dụng các tham số mặc định
+    
+    try:
+        # Thực hiện đếm
+        count, annotated_image, edges = counter.count_beans(image_path)
+        
+        # Tải lại ảnh gốc để hiển thị
+        original_image = cv2.imread(image_path)
+        
+        # Hiển thị kết quả
+        counter.display_results(original_image, annotated_image, edges, count)
+        
+        print(f"Hoàn thành! Tổng số hạt đếm được: {count}")
+        
+    except Exception as e:
+        print(f"Đã xảy ra lỗi: {e}")
+
+# Additional utility function for batch processing
+def batch_count_beans(image_folder, output_folder=None):
+    """
+    Count beans in multiple images
+    
+    Args:
+        image_folder: Folder containing images
+        output_folder: Optional folder to save annotated images
+    """
+    import os
+    from pathlib import Path
+    
+    counter = BeanCounter()
+    results = []
+    
+    for image_file in Path(image_folder).glob('*.jpg'):
+        try:
+            count, annotated, _ = counter.count_beans(str(image_file))
+            results.append((image_file.name, count))
+            
+            if output_folder:
+                output_path = Path(output_folder) / f"annotated_{image_file.name}"
+                cv2.imwrite(str(output_path), annotated)
+                
+        except Exception as e:
+            print(f"Error processing {image_file}: {e}")
+    
+    return results
