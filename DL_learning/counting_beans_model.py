@@ -1,6 +1,8 @@
 import cv2
 import numpy as np
 import matplotlib.pyplot as plt
+from skimage.feature import peak_local_max # <-- Import công cụ mới
+from scipy import ndimage # <-- Dùng để gán nhãn
 import os
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -282,8 +284,8 @@ def count_beans_adaptive_final(image_path):
     # Thay thế Otsu bằng Adaptive Thresholding để xử lý các hạt dính nhau
     # blockSize: Kích thước vùng lân cận để tính ngưỡng (phải là số lẻ)
     # C: Hằng số trừ đi từ giá trị trung bình, giúp tinh chỉnh kết quả
-    blockSize = 25 # Có thể thử các giá trị như 15, 21, 25, 31...
-    C = 4          # Có thể thử các giá trị như 2, 3, 4, 5...
+    blockSize = 25           # Có thể thử các giá trị như 15, 21, 25, 31...
+    C = 2         # Có thể thử các giá trị như 2, 3, 4, 5...
     thresh = cv2.adaptiveThreshold(foreground, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
                                    cv2.THRESH_BINARY_INV, blockSize, C)
     step_imgs.append(thresh); step_titles.append(f"4. Adaptive Threshold (Block={blockSize}, C={C})")
@@ -326,7 +328,8 @@ def count_beans_adaptive_final(image_path):
 
     print(f"Tổng số lượng hạt đậu đếm được: {bean_count}")
     cv2.putText(img_labeled, f"Count: {bean_count}", (20, 50), cv2.FONT_HERSHEY_SIMPLEX, 1.5, (0, 0, 255), 3)
-    step_imgs.append(cv2.cvtColor(img_labeled, cv2.COLOR_BGR2RGB)); step_titles.append(f'10. Final Result ({bean_count} beans)')
+    step_imgs.append(cv2.cvtColor(img_labeled, cv2.COLOR_BGR2RGB))
+    step_titles.append(f'10. Final Result ({bean_count} beans)')
     
     # Hiển thị
     plt.figure(figsize=(16, 12))
@@ -337,5 +340,67 @@ def count_beans_adaptive_final(image_path):
         plt.imshow(img_disp, cmap=cmap); plt.title(title, fontsize=10); plt.axis('off')
     plt.tight_layout(); plt.show()
 
+def count_beans_peak_final(image_path):
+    """
+    Sử dụng Peak Local Maxima trên Distance Transform để tạo 'hạt giống'
+    một cách chính xác nhất cho thuật toán Watershed.
+    """
+    img = cv2.imread(image_path)
+    if img is None: return
+
+    img_labeled = img.copy()
+    # Các bước 1-5 giữ nguyên như cũ vì đã rất tốt
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    background = cv2.GaussianBlur(gray, (151, 151), 0)
+    foreground = cv2.subtract(gray, background)
+    foreground = cv2.bitwise_not(foreground)
+    thresh = cv2.adaptiveThreshold(foreground, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                                   cv2.THRESH_BINARY_INV, 25, 2)
+    kernel = np.ones((3, 3), np.uint8)
+    opening = cv2.morphologyEx(thresh, cv2.MORPH_OPEN, kernel, iterations=1)
+
+    # Bước 6 & 7: Tính Distance Transform
+    sure_bg = cv2.dilate(opening, kernel, iterations=3)
+    dist_transform = cv2.distanceTransform(opening, cv2.DIST_L2, 5)
+
+    # --- Bước 8: NÂNG CẤP LỚN NHẤT - SỬ DỤNG PEAK LOCAL MAXIMA ---
+    # Thay vì dùng ngưỡng, ta tìm tất cả các đỉnh cục bộ
+    # min_distance: Khoảng cách tối thiểu giữa các đỉnh (quan trọng!)
+    coords = peak_local_max(dist_transform, min_distance=3)
+    sure_fg = np.zeros(dist_transform.shape, dtype=bool)
+    sure_fg[tuple(coords.T)] = True
+    
+    # Tạo markers từ các đỉnh đã tìm được
+    markers, _ = ndimage.label(sure_fg)
+    print(f"Số lượng hạt giống tìm thấy: {markers.max()}")
+    
+    # --- Các bước sau được điều chỉnh để phù hợp ---
+    sure_fg = np.uint8(sure_fg) * 255 # Chuyển đổi để hiển thị
+    unknown = cv2.subtract(sure_bg, sure_fg)
+    markers = markers + 1
+    markers[unknown == 255] = 0
+    
+    # Áp dụng Watershed
+    markers = cv2.watershed(img, markers)
+
+    # --- Đếm và hiển thị kết quả ---
+    unique_labels = np.unique(markers)
+    bean_count = len([label for label in unique_labels if label > 1])
+    print(f"Tổng số lượng hạt đậu đếm được: {bean_count}")
+    
+    # Vẽ viền
+    for label in unique_labels:
+        if label <= 1: continue
+        mask = np.zeros(markers.shape, dtype=np.uint8)
+        mask[markers == label] = 255
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        cv2.drawContours(img_labeled, contours, -1, (0, 255, 0), 1)
+
+    cv2.putText(img_labeled, f"Count: {bean_count}", (20, 50), cv2.FONT_HERSHEY_SIMPLEX, 1.5, (0, 0, 255), 3)
+    plt.imshow(cv2.cvtColor(img_labeled, cv2.COLOR_BGR2RGB))
+    plt.title(f'Final Result ({bean_count} beans)')
+    plt.axis('off')
+    plt.show()
+
 # --- Chạy chương trình ---
-count_beans_adaptive_final(image_path)
+count_beans_peak_final(image_path)
